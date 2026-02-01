@@ -50,7 +50,7 @@ function showTranslation(text, x, y, isTranslating = false) {
             box-shadow: 0 4px 20px rgba(0,0,0,0.15);
             font-size: 14px;
             font-family: 'Segoe UI', Arial, sans-serif;
-            max-width: 300px;
+            max-width: 320px;
             min-width: 120px;
             word-wrap: break-word;
             z-index: 1000000;
@@ -58,7 +58,7 @@ function showTranslation(text, x, y, isTranslating = false) {
             opacity: 0;
             transition: opacity 0.25s ease, transform 0.25s ease;
             transform: translateY(-8px);
-            line-height: 1.4;
+            line-height: 1.5;
         `;
 
         document.body.appendChild(popup);
@@ -78,7 +78,7 @@ function showTranslation(text, x, y, isTranslating = false) {
         popup.style.background = "#ffffff";
     }
 
-    /* === REAL SIZE CALCULATION === */
+    /* === SIZE CALCULATION === */
     popup.style.visibility = "hidden";
     popup.style.display = "block";
 
@@ -90,7 +90,7 @@ function showTranslation(text, x, y, isTranslating = false) {
 
     /* === POSITION NEAR SELECTION === */
     let finalX = x - popupWidth / 2;
-    let finalY = y - popupHeight - 12; // above word
+    let finalY = y - popupHeight - 12;
 
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
@@ -101,7 +101,7 @@ function showTranslation(text, x, y, isTranslating = false) {
     }
 
     if (finalY < 10) {
-        finalY = y + 14; // show below if no space above
+        finalY = y + 14;
     }
 
     popup.style.left = `${finalX}px`;
@@ -112,8 +112,8 @@ function showTranslation(text, x, y, isTranslating = false) {
         popup.style.transform = "translateY(0)";
     }, 10);
 
-    /* === AUTO HIDE TIME === */
-    const autoRemoveTime = isTranslating ? 4000 : 10000; // 10 sec
+    /* === AUTO HIDE === */
+    const autoRemoveTime = isTranslating ? 4000 : 10000;
 
     hidePopupTimeout = setTimeout(() => {
         if (isTranslating) return;
@@ -128,7 +128,6 @@ function updatePopup(newText) {
     popup.style.color = "#333";
     popup.style.fontStyle = "normal";
     popup.style.background = "#ffffff";
-
     popup.style.opacity = "0.85";
 
     setTimeout(() => {
@@ -160,13 +159,14 @@ function removePopup() {
 
 /* ================= SELECTION EVENTS ================= */
 
+/* === DOUBLE CLICK (WORD / SENTENCE) === */
 document.addEventListener("dblclick", () => {
     setTimeout(() => {
         const selection = window.getSelection();
         if (!selection || !selection.toString().trim()) return;
 
         const text = selection.toString().trim();
-        if (text.length > 100) return;
+        if (text.length > 300) return;
 
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
@@ -180,14 +180,16 @@ document.addEventListener("dblclick", () => {
     }, 80);
 });
 
+/* === MOUSE SELECTION (WORD / SENTENCE) === */
 document.addEventListener("mouseup", (e) => {
     if (e.button !== 0) return;
 
     setTimeout(() => {
         const selection = window.getSelection();
-        const text = selection.toString().trim();
+        if (!selection) return;
 
-        if (!text || text.includes(" ") || text.length > 50) return;
+        const text = selection.toString().trim();
+        if (!text || text.length > 300) return;
 
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
