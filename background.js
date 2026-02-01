@@ -1,29 +1,33 @@
 // Create context menu on installation
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
-        id: "translate-selection",
-        title: "Translate to Hindi",
+        id: "lookup-word",
+        title: "Look up meaning in English",
         contexts: ["selection"]
     });
 });
 
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-    if (info.menuItemId === "translate-selection" && info.selectionText) {
-        // Ensure content script is injected before translating
-        ensureContentScriptInjected(tab.id).then(() => {
-            translateText(info.selectionText, tab.id);
-        }).catch(error => {
-            console.error("Failed to inject content script:", error);
-            translateText(info.selectionText, tab.id);
-        });
+    if (info.menuItemId === "lookup-word" && info.selectionText) {
+        const text = info.selectionText.trim();
+        
+        // Only process single words
+        if (text.split(/\s+/).length === 1) {
+            ensureContentScriptInjected(tab.id).then(() => {
+                lookupWordMeaning(text.toLowerCase(), tab.id);
+            }).catch(error => {
+                console.error("Failed to inject content script:", error);
+                lookupWordMeaning(text.toLowerCase(), tab.id);
+            });
+        }
     }
 });
 
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((msg, sender) => {
-    if (msg.action === "translate" && msg.text) {
-        translateText(msg.text, sender.tab.id, msg.x, msg.y);
+    if (msg.action === "lookupWord" && msg.word) {
+        lookupWordMeaning(msg.word, sender.tab.id, msg.x, msg.y);
     }
 });
 
@@ -38,7 +42,6 @@ function ensureContentScriptInjected(tabId) {
                     files: ['content.js']
                 }).then(() => {
                     console.log("Content script injected successfully");
-                    // Give it a moment to initialize
                     setTimeout(() => resolve(), 100);
                 }).catch(error => {
                     console.error("Failed to inject content script:", error);
@@ -51,23 +54,23 @@ function ensureContentScriptInjected(tabId) {
     });
 }
 
-// Main translation function
-function translateText(text, tabId, x = null, y = null) {
-    console.log("Translating:", text);
+// Main word lookup function
+function lookupWordMeaning(word, tabId, x = null, y = null) {
+    console.log("Looking up word:", word);
     
-    // Send "Translating..." message immediately
+    // Send "Looking up..." message immediately
     if (tabId) {
         sendToContentScript(tabId, {
-            action: "showTranslation",
-            translatedText: "Translating...",
+            action: "showMeaning",
+            meaning: "Looking up...",
             x: x || 100,
             y: y || 100
         });
     }
     
-    // Small delay before actual translation to ensure popup is visible
+    // Small delay before actual lookup to ensure popup is visible
     setTimeout(() => {
-        translateWithGoogle(text, tabId, x, y);
+        getWordDefinition(word, tabId, x, y);
     }, 100);
 }
 
@@ -89,9 +92,88 @@ function sendToContentScript(tabId, message) {
     });
 }
 
-// Method 1: Google Translate
-function translateWithGoogle(text, tabId, x, y) {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=hi&dt=t&q=${encodeURIComponent(text)}`;
+// Method 1: Dictionary API (Primary)
+function getWordDefinition(word, tabId, x, y) {
+    const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
+    
+    fetch(url)
+        .then(response => {
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error("Word not found");
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log("Dictionary API response:", data);
+            
+            let result = "";
+            
+            if (Array.isArray(data) && data.length > 0) {
+                const wordData = data[0];
+                const formattedData = formatDictionaryData(wordData);
+                
+                if (tabId) {
+                    sendToContentScript(tabId, {
+                        action: "showMeaning",
+                        meaning: formattedData,
+                        x: x || 100,
+                        y: y || 100
+                    });
+                }
+            } else {
+                throw new Error("No definitions found");
+            }
+        })
+        .catch(error => {
+            console.error("Dictionary API error:", error);
+            getWordDefinitionFallback(word, tabId, x, y);
+        });
+}
+
+// Format dictionary data
+function formatDictionaryData(wordData) {
+    const result = {
+        word: wordData.word,
+        phonetic: wordData.phonetic || (wordData.phonetics && wordData.phonetics[0] && wordData.phonetics[0].text) || '',
+        meanings: [],
+        synonyms: []
+    };
+    
+    if (wordData.meanings && wordData.meanings.length > 0) {
+        result.meanings = wordData.meanings.map(meaning => ({
+            partOfSpeech: meaning.partOfSpeech,
+            definitions: meaning.definitions ? meaning.definitions.slice(0, 3).map(def => ({
+                definition: def.definition,
+                example: def.example || ''
+            })) : []
+        }));
+        
+        // Extract synonyms
+        const allSynonyms = new Set();
+        wordData.meanings.forEach(meaning => {
+            if (meaning.synonyms) {
+                meaning.synonyms.forEach(syn => allSynonyms.add(syn));
+            }
+            if (meaning.definitions) {
+                meaning.definitions.forEach(def => {
+                    if (def.synonyms) {
+                        def.synonyms.forEach(syn => allSynonyms.add(syn));
+                    }
+                });
+            }
+        });
+        result.synonyms = Array.from(allSynonyms).slice(0, 8);
+    }
+    
+    return result;
+}
+
+// Method 2: Datamuse API (Fallback)
+function getWordDefinitionFallback(word, tabId, x, y) {
+    const url = `https://api.datamuse.com/words?sp=${encodeURIComponent(word)}&md=d&max=5`;
     
     fetch(url)
         .then(response => {
@@ -99,62 +181,54 @@ function translateWithGoogle(text, tabId, x, y) {
             return response.json();
         })
         .then(data => {
-            console.log("Google translate response:", data);
-            let translatedText = "";
+            console.log("Datamuse response:", data);
             
-            if (data && data[0] && data[0][0] && data[0][0][0]) {
-                translatedText = data[0][0][0];
-            } else {
-                translatedText = "Translation not available";
-            }
-            
-            if (tabId) {
-                sendToContentScript(tabId, {
-                    action: "showTranslation",
-                    translatedText: translatedText,
-                    x: x || 100,
-                    y: y || 100
+            if (data.length > 0 && data[0].defs) {
+                // Format the definitions
+                const definitions = data[0].defs.slice(0, 3).map(def => {
+                    const parts = def.split('\t');
+                    return {
+                        partOfSpeech: parts[0] ? parts[0].replace(/^[a-z]+\.$/, '$&') : 'n.',
+                        definition: parts[1] || def
+                    };
                 });
+                
+                const formattedData = {
+                    word: word,
+                    phonetic: '',
+                    meanings: [{
+                        partOfSpeech: 'various',
+                        definitions: definitions
+                    }],
+                    synonyms: []
+                };
+                
+                if (tabId) {
+                    sendToContentScript(tabId, {
+                        action: "showMeaning",
+                        meaning: formattedData,
+                        x: x || 100,
+                        y: y || 100
+                    });
+                }
+            } else {
+                if (tabId) {
+                    sendToContentScript(tabId, {
+                        action: "showMeaning",
+                        meaning: `No English definition found for "${word}"`,
+                        x: x || 100,
+                        y: y || 100
+                    });
+                }
             }
         })
         .catch(error => {
-            console.error("Google translate error:", error);
-            translateWithMyMemory(text, tabId, x, y);
-        });
-}
-
-// Method 2: MyMemory Translation API (fallback)
-function translateWithMyMemory(text, tabId, x, y) {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|hi`;
-    
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            console.log("MyMemory response:", data);
-            let translatedText = "";
-            
-            if (data && data.responseData && data.responseData.translatedText) {
-                translatedText = data.responseData.translatedText;
-            } else {
-                translatedText = "Could not translate";
-            }
+            console.error("Datamuse API error:", error);
             
             if (tabId) {
                 sendToContentScript(tabId, {
-                    action: "showTranslation",
-                    translatedText: translatedText,
-                    x: x || 100,
-                    y: y || 100
-                });
-            }
-        })
-        .catch(error => {
-            console.error("All translation APIs failed:", error);
-            
-            if (tabId) {
-                sendToContentScript(tabId, {
-                    action: "showTranslation",
-                    translatedText: `Error: Service unavailable`,
+                    action: "showMeaning",
+                    meaning: `Error: Could not fetch definition for "${word}"`,
                     x: x || 100,
                     y: y || 100
                 });

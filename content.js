@@ -1,8 +1,6 @@
-console.log("PDF Word Translator content script loaded");
+console.log("Word Dictionary content script loaded");
 
 let popup = null;
-let hidePopupTimeout = null;
-let isShowingTranslating = false;
 
 /* ================= MESSAGE LISTENER ================= */
 
@@ -12,17 +10,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
-    if (msg.action === "showTranslation") {
-        if (msg.translatedText === "Translating...") {
-            isShowingTranslating = true;
-            showTranslation(msg.translatedText, msg.x, msg.y, true);
+    if (msg.action === "showMeaning") {
+        if (msg.meaning === "Looking up...") {
+            showMeaning(msg.meaning, msg.x, msg.y, true);
         } else {
-            if (isShowingTranslating && popup) {
-                updatePopup(msg.translatedText);
-                isShowingTranslating = false;
-            } else {
-                showTranslation(msg.translatedText, msg.x, msg.y, false);
-            }
+            showMeaning(msg.meaning, msg.x, msg.y, false);
         }
     }
     return true;
@@ -30,53 +22,163 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 /* ================= POPUP FUNCTIONS ================= */
 
-function showTranslation(text, x, y, isTranslating = false) {
-
-    if (hidePopupTimeout) {
-        clearTimeout(hidePopupTimeout);
-        hidePopupTimeout = null;
+function showMeaning(text, x, y, isLookingUp = false) {
+    // Remove existing popup if any
+    if (popup) {
+        popup.remove();
+        popup = null;
     }
 
-    if (!popup) {
-        popup = document.createElement("div");
-        popup.id = "translation-popup";
-
+    popup = document.createElement("div");
+    popup.id = "dictionary-popup";
+    
+    if (typeof text === 'object' && text.word) {
+        // Structured meaning data
         popup.style.cssText = `
             position: absolute;
             background: #ffffff;
             border: 1px solid #ddd;
-            padding: 12px 16px;
-            border-radius: 8px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            padding: 14px 18px;
+            border-radius: 10px;
+            box-shadow: 0 6px 25px rgba(0,0,0,0.18);
             font-size: 14px;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            max-width: 320px;
-            min-width: 120px;
+            font-family: 'Segoe UI', 'Arial', sans-serif;
+            max-width: 350px;
+            min-width: 200px;
             word-wrap: break-word;
             z-index: 1000000;
-            pointer-events: none;
+            pointer-events: auto;
             opacity: 0;
-            transition: opacity 0.25s ease, transform 0.25s ease;
-            transform: translateY(-8px);
-            line-height: 1.5;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            transform: translateY(-10px);
+            line-height: 1.6;
+            color: #333;
+            cursor: default;
+            border-left: 5px solid #3498db;
         `;
-
-        document.body.appendChild(popup);
-    }
-
-    popup.textContent = text;
-
-    if (isTranslating) {
-        popup.style.borderLeft = "4px solid #FF9800";
-        popup.style.color = "#666";
-        popup.style.fontStyle = "italic";
-        popup.style.background = "#fffaf0";
+        
+        let html = `
+            <div style="position: relative;">
+                <div style="font-weight: bold; color: #2c3e50; font-size: 18px; margin-bottom: 8px; padding-right: 20px;">
+                    ${text.word}
+                </div>
+                <div style="position: absolute; top: 0; right: 0; cursor: pointer; color: #95a5a6; font-size: 18px; font-weight: bold; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: all 0.2s;" 
+                     onmouseover="this.style.backgroundColor='#f0f0f0'; this.style.color='#e74c3c';" 
+                     onmouseout="this.style.backgroundColor='transparent'; this.style.color='#95a5a6';"
+                     onclick="this.closest('#dictionary-popup').style.opacity='0'; setTimeout(() => this.closest('#dictionary-popup')?.remove(), 300);">
+                    ×
+                </div>
+            </div>`;
+        
+        if (text.phonetic) {
+            html += `<div style="color: #7f8c8d; font-style: italic; font-size: 13px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee;">
+                        Pronunciation: /${text.phonetic}/
+                    </div>`;
+        }
+        
+        if (text.meanings && text.meanings.length > 0) {
+            text.meanings.slice(0, 2).forEach(meaning => {
+                html += `<div style="color: #e74c3c; font-weight: 600; font-size: 13px; margin: 15px 0 8px 0; padding: 4px 0; border-bottom: 1px solid #f0f0f0;">
+                            ${meaning.partOfSpeech}
+                        </div>`;
+                
+                if (meaning.definitions && meaning.definitions.length > 0) {
+                    meaning.definitions.slice(0, 3).forEach((def, index) => {
+                        html += `<div style="margin: 10px 0 8px 0; padding-left: 12px; position: relative;">
+                                    <span style="position: absolute; left: 0; color: #3498db; font-weight: bold;">${index + 1}.</span>
+                                    <div style="margin-bottom: 4px;">${def.definition}</div>`;
+                        
+                        if (def.example) {
+                            html += `<div style="color: #27ae60; font-style: italic; font-size: 12px; margin: 6px 0 8px 12px; padding-left: 8px; border-left: 2px solid #27ae60;">
+                                        Example: "${def.example}"
+                                    </div>`;
+                        }
+                        
+                        html += `</div>`;
+                    });
+                }
+            });
+        }
+        
+        if (text.synonyms && text.synonyms.length > 0) {
+            html += `<div style="margin-top: 15px; padding-top: 12px; border-top: 1px solid #eee;">
+                        <div style="color: #8e44ad; font-weight: 600; font-size: 13px; margin-bottom: 6px;">
+                            Synonyms:
+                        </div>
+                        <div style="color: #34495e; font-size: 13px; line-height: 1.8;">
+                            ${text.synonyms.slice(0, 8).map(syn => `<span style="display: inline-block; background: #f8f9fa; padding: 2px 8px; margin: 2px 4px 2px 0; border-radius: 12px; border: 1px solid #e9ecef;">${syn}</span>`).join('')}
+                        </div>
+                    </div>`;
+        }
+        
+        // Footer with instructions
+        html += `<div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee; text-align: center;">
+                    <small style="color: #95a5a6; font-size: 11px;">
+                        Click outside or press ESC to close
+                    </small>
+                 </div>`;
+        
+        popup.innerHTML = html;
+        
     } else {
-        popup.style.borderLeft = "4px solid #4CAF50";
-        popup.style.color = "#333";
-        popup.style.fontStyle = "normal";
-        popup.style.background = "#ffffff";
+        // Simple text message (for loading/error states)
+        popup.style.cssText = `
+            position: absolute;
+            background: ${isLookingUp ? '#fffaf0' : text.includes('Error') ? '#fff5f5' : '#ffffff'};
+            border: 1px solid #ddd;
+            padding: 16px 20px;
+            border-radius: 10px;
+            box-shadow: 0 6px 25px rgba(0,0,0,0.18);
+            font-size: 14px;
+            font-family: 'Segoe UI', 'Arial', sans-serif;
+            max-width: 300px;
+            min-width: 180px;
+            word-wrap: break-word;
+            z-index: 1000000;
+            pointer-events: auto;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            transform: translateY(-10px);
+            line-height: 1.6;
+            color: ${isLookingUp ? '#666' : text.includes('Error') ? '#c0392b' : '#333'};
+            cursor: default;
+            border-left: 5px solid ${isLookingUp ? '#f39c12' : text.includes('Error') ? '#e74c3c' : '#2ecc71'};
+            font-style: ${isLookingUp ? 'italic' : 'normal'};
+        `;
+        
+        let closeButton = '';
+        if (!isLookingUp) {
+            closeButton = `
+                <div style="position: absolute; top: 8px; right: 10px; cursor: pointer; color: #95a5a6; font-size: 18px; font-weight: bold; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: all 0.2s;" 
+                     onmouseover="this.style.backgroundColor='#f0f0f0'; this.style.color='#e74c3c';" 
+                     onmouseout="this.style.backgroundColor='transparent'; this.style.color='#95a5a6';"
+                     onclick="this.closest('#dictionary-popup').style.opacity='0'; setTimeout(() => this.closest('#dictionary-popup')?.remove(), 300);">
+                    ×
+                </div>`;
+        }
+        
+        popup.innerHTML = `
+            <div style="position: relative;">
+                <div style="padding-right: ${isLookingUp ? '0' : '30px'};">${text}</div>
+                ${closeButton}
+            </div>`;
+        
+        // Auto-remove only for "Looking up..." message after 4 seconds
+        if (isLookingUp) {
+            setTimeout(() => {
+                if (popup && popup.innerHTML.includes("Looking up...")) {
+                    popup.style.opacity = "0";
+                    popup.style.transform = "translateY(-10px)";
+                    setTimeout(() => {
+                        popup?.remove();
+                        popup = null;
+                    }, 300);
+                }
+            }, 4000);
+        }
     }
+
+    document.body.appendChild(popup);
 
     /* === SIZE CALCULATION === */
     popup.style.visibility = "hidden";
@@ -90,97 +192,44 @@ function showTranslation(text, x, y, isTranslating = false) {
 
     /* === POSITION NEAR SELECTION === */
     let finalX = x - popupWidth / 2;
-    let finalY = y - popupHeight - 12;
+    let finalY = y - popupHeight - 15;
 
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
+    // Boundary checks
     if (finalX < 10) finalX = 10;
     if (finalX + popupWidth > viewportWidth - 10) {
         finalX = viewportWidth - popupWidth - 10;
     }
 
     if (finalY < 10) {
-        finalY = y + 14;
+        finalY = y + 16;
     }
 
     popup.style.left = `${finalX}px`;
     popup.style.top = `${finalY}px`;
 
+    // Animate in
     setTimeout(() => {
         popup.style.opacity = "1";
         popup.style.transform = "translateY(0)";
     }, 10);
-
-    /* === AUTO HIDE === */
-    const autoRemoveTime = isTranslating ? 4000 : 10000;
-
-    hidePopupTimeout = setTimeout(() => {
-        if (isTranslating) return;
-        removePopup();
-    }, autoRemoveTime);
-}
-
-function updatePopup(newText) {
-    if (!popup) return;
-
-    popup.style.borderLeft = "4px solid #4CAF50";
-    popup.style.color = "#333";
-    popup.style.fontStyle = "normal";
-    popup.style.background = "#ffffff";
-    popup.style.opacity = "0.85";
-
-    setTimeout(() => {
-        popup.textContent = newText;
-        popup.style.opacity = "1";
-
-        if (hidePopupTimeout) clearTimeout(hidePopupTimeout);
-        hidePopupTimeout = setTimeout(removePopup, 10000);
-    }, 120);
 }
 
 function removePopup() {
-    if (hidePopupTimeout) {
-        clearTimeout(hidePopupTimeout);
-        hidePopupTimeout = null;
-    }
-
-    isShowingTranslating = false;
-
     if (popup) {
         popup.style.opacity = "0";
-        popup.style.transform = "translateY(-8px)";
+        popup.style.transform = "translateY(-10px)";
         setTimeout(() => {
             popup?.remove();
             popup = null;
-        }, 250);
+        }, 300);
     }
 }
 
 /* ================= SELECTION EVENTS ================= */
 
-/* === DOUBLE CLICK (WORD / SENTENCE) === */
-document.addEventListener("dblclick", () => {
-    setTimeout(() => {
-        const selection = window.getSelection();
-        if (!selection || !selection.toString().trim()) return;
-
-        const text = selection.toString().trim();
-        if (text.length > 300) return;
-
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-
-        chrome.runtime.sendMessage({
-            action: "translate",
-            text,
-            x: rect.left + rect.width / 2 + window.scrollX,
-            y: rect.top + window.scrollY
-        });
-    }, 80);
-});
-
-/* === MOUSE SELECTION (WORD / SENTENCE) === */
 document.addEventListener("mouseup", (e) => {
     if (e.button !== 0) return;
 
@@ -189,28 +238,68 @@ document.addEventListener("mouseup", (e) => {
         if (!selection) return;
 
         const text = selection.toString().trim();
-        if (!text || text.length > 300) return;
+        
+        // Only process single words
+        if (!text || text.split(/\s+/).length > 1) return;
+        
+        // Clean word (remove punctuation)
+        const word = text.replace(/[^\w'-]/g, '');
+        if (!word || word.length < 2) return;
 
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
 
         chrome.runtime.sendMessage({
-            action: "translate",
-            text,
+            action: "lookupWord",
+            word: word.toLowerCase(),
             x: rect.left + rect.width / 2 + window.scrollX,
             y: rect.top + window.scrollY
         });
     }, 120);
 });
 
+/* ================= DOUBLE CLICK EVENT ================= */
+
+document.addEventListener("dblclick", () => {
+    setTimeout(() => {
+        const selection = window.getSelection();
+        if (!selection || !selection.toString().trim()) return;
+
+        const text = selection.toString().trim();
+        
+        // Only process single words
+        if (text.split(/\s+/).length > 1) return;
+        
+        const word = text.replace(/[^\w'-]/g, '');
+        if (!word || word.length < 2) return;
+
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        chrome.runtime.sendMessage({
+            action: "lookupWord",
+            word: word.toLowerCase(),
+            x: rect.left + rect.width / 2 + window.scrollX,
+            y: rect.top + window.scrollY
+        });
+    }, 80);
+});
+
 /* ================= CLOSE CONDITIONS ================= */
 
-document.addEventListener("mousedown", () => {
-    if (popup) removePopup();
+// Close when clicking outside the popup
+document.addEventListener("mousedown", (e) => {
+    if (popup && !popup.contains(e.target)) {
+        removePopup();
+    }
 });
 
-window.addEventListener("scroll", removePopup, { passive: true });
-
+// Close on Escape key
 document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") removePopup();
+    if (e.key === "Escape" && popup) {
+        removePopup();
+    }
 });
+
+// Don't close on scroll for manual close version
+// (comment out or remove the scroll listener)

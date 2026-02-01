@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "PDF Word Translator",
+  "name": "Word Meaning Dictionary",
   "version": "1.2",
-  "description": "Double-click any word to see Hindi translation",
+  "description": "Get English meaning of selected words",
   "permissions": [
     "contextMenus",
     "scripting",
     "activeTab"
   ],
   "host_permissions": [
-    "https://translate.googleapis.com/*",
-    "https://api.mymemory.translated.net/*",
+    "https://api.dictionaryapi.dev/*",
+    "https://api.datamuse.com/*",
     "<all_urls>"
   ],
   "background": {
